@@ -132,7 +132,7 @@ function HymnEditor({ id }: { id: string }) {
         </p>
       </header>
       {draft ? (
-        <HymnForm key={id} initial={draft} submitLabel="Save changes" onSubmit={(next) => updateHymn(id, next)} />
+        <HymnForm key={id} hymnId={id} initial={draft} submitLabel="Save changes" onSubmit={(next) => updateHymn(id, next)} />
       ) : null}
       <div className="actions">
         <Link className="btn btn-quiet" to="/update">

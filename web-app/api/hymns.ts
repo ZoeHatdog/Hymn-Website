@@ -1,0 +1,301 @@
+import express, { Router, type Response } from "express";
+import { isWebp, putImage, resolveImageUrl } from "./includes/bucket.ts";
+import { goodCursor } from "./includes/good_cursor.ts";
+import { default_sort, fields, primary_key, schema, table } from "./includes/models/hymn.js";
+
+const hymnModel = { fields, table, primary_key, default_sort, schema };
+
+type HymnRow = Record<string, unknown>;
+
+type HymnBody = {
+  title?: unknown;
+  author?: unknown;
+  lyrics?: unknown;
+  library?: unknown;
+  link?: unknown;
+  tags?: unknown;
+};
+
+const hymns = Router();
+
+hymns.get("/", async (_req, res) => {
+  try {
+    const rows = await goodCursor.getAll(hymnModel, undefined, undefined, "title");
+    res.json({ success: true, data: rows.map(toSummary) });
+  } catch (error) {
+    sendLibraryError(res, error);
+  }
+});
+
+hymns.get("/:id", async (req, res) => {
+  try {
+    const hymn = await findHymn(req.params.id);
+    if (!hymn) {
+      sendFailure(res, 404, "That hymn is not in the library.");
+      return;
+    }
+    res.json({ success: true, data: await toHymn(hymn) });
+  } catch (error) {
+    sendLibraryError(res, error);
+  }
+});
+
+hymns.post("/", async (req, res) => {
+  try {
+    const parsed = readHymn(req.body);
+    if (parsed.error || !parsed.row) {
+      sendFailure(res, 400, parsed.error ?? "The hymn could not be saved.");
+      return;
+    }
+
+    const now = goodCursor.buildNestedQuery("CURRENT_TIMESTAMP");
+    const inserted = await goodCursor.insert(hymnModel, {
+      ...parsed.row,
+      created: now,
+      updated: now,
+    });
+    const created = await findHymn(inserted[0]?.id);
+    if (!created) {
+      sendFailure(res, 500, "The hymn was saved, but it could not be read back.");
+      return;
+    }
+    res.status(201).json({ success: true, data: await toHymn(created) });
+  } catch (error) {
+    sendLibraryError(res, error);
+  }
+});
+
+hymns.post("/:id/image", express.raw({ type: "image/webp", limit: "12mb" }), async (req, res) => {
+  try {
+    const existing = await findHymn(req.params.id);
+    if (!existing) {
+      sendFailure(res, 404, "That hymn is not in the library.");
+      return;
+    }
+
+    const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (!isWebp(body)) {
+      sendFailure(res, 400, "Only .webp files can be uploaded.");
+      return;
+    }
+
+    const key = imageKey(String(existing.id), headerName(req.headers["x-file-name"]));
+    await putImage(key, body);
+    const paths = [...asTags(existing.imagePaths), key];
+    await goodCursor.update(
+      hymnModel,
+      { imagePaths: paths, updated: goodCursor.buildNestedQuery("CURRENT_TIMESTAMP") },
+      { id: existing.id },
+    );
+    const updated = await findHymn(existing.id);
+    if (!updated) {
+      sendFailure(res, 500, "The sheet was stored, but the hymn could not be read back.");
+      return;
+    }
+    res.status(201).json({ success: true, data: await toHymn(updated) });
+  } catch (error) {
+    sendLibraryError(res, error);
+  }
+});
+
+hymns.put("/:id", async (req, res) => {
+  try {
+    const existing = await findHymn(req.params.id);
+    if (!existing) {
+      sendFailure(res, 404, "That hymn is not in the library.");
+      return;
+    }
+
+    const parsed = readHymn(req.body);
+    if (parsed.error || !parsed.row) {
+      sendFailure(res, 400, parsed.error ?? "The hymn could not be saved.");
+      return;
+    }
+
+    await goodCursor.update(
+      hymnModel,
+      { ...parsed.row, updated: goodCursor.buildNestedQuery("CURRENT_TIMESTAMP") },
+      { id: existing.id },
+    );
+    const updated = await findHymn(existing.id);
+    if (!updated) {
+      sendFailure(res, 500, "The hymn was saved, but it could not be read back.");
+      return;
+    }
+    res.json({ success: true, data: await toHymn(updated) });
+  } catch (error) {
+    sendLibraryError(res, error);
+  }
+});
+
+hymns.delete("/:id", async (req, res) => {
+  try {
+    const existing = await findHymn(req.params.id);
+    if (!existing) {
+      sendFailure(res, 404, "That hymn is not in the library.");
+      return;
+    }
+
+    await goodCursor.delete(hymnModel, { id: existing.id });
+    res.json({ success: true, data: { id: String(existing.id) } });
+  } catch (error) {
+    sendLibraryError(res, error);
+  }
+});
+
+async function findHymn(rawId: unknown): Promise<HymnRow | null> {
+  const id = parseId(rawId);
+  if (id == null) {
+    return null;
+  }
+  const rows = await goodCursor.getOne(hymnModel, undefined, { id });
+  return rows[0] ?? null;
+}
+
+function headerName(value: unknown): string {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return typeof raw === "string" ? raw : "";
+}
+
+function imageKey(id: string, filename: string): string {
+  const base = filename
+    .trim()
+    .replace(/\.webp$/i, "")
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+  return `uploads/${id}/${base || "sheet"}-${Date.now()}.webp`;
+}
+
+function parseId(rawId: unknown): string | null {
+  const text = Array.isArray(rawId) ? String(rawId[0] ?? "") : String(rawId ?? "");
+  const id = text.trim();
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) {
+    return null;
+  }
+  return id;
+}
+
+function readHymn(body: unknown): { row?: HymnRow; error?: string } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { error: "The hymn details were missing." };
+  }
+
+  const input = body as HymnBody;
+  const title = requiredText(input.title);
+  const author = requiredText(input.author);
+  const lyrics = requiredText(input.lyrics);
+  if (!title) return { error: "A title is required." };
+  if (!author) return { error: "An author is required." };
+  if (!lyrics) return { error: "Lyrics are required." };
+
+  const library = optionalText(input.library);
+  const link = optionalText(input.link);
+  if (library.error) return { error: library.error };
+  if (library.value !== "TBC" && library.value !== "Rejoice") {
+    return { error: "Choose TBC or Rejoice." };
+  }
+  if (link.error) return { error: link.error };
+
+  const tags = readTags(input.tags);
+  if (tags.error || !tags.value) return { error: tags.error ?? "Tags must be a list of words." };
+
+  return {
+    row: {
+      title,
+      author,
+      lyrics,
+      library: library.value,
+      link: link.value,
+      tags: tags.value,
+    },
+  };
+}
+
+function requiredText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function optionalText(value: unknown): { value: string | null; error?: string } {
+  if (value == null) return { value: null };
+  if (typeof value !== "string") return { value: null, error: "Optional text fields must be words or empty." };
+  const trimmed = value.trim();
+  return { value: trimmed.length > 0 ? trimmed : null };
+}
+
+function readTags(value: unknown): { value?: string[]; error?: string } {
+  if (value == null) return { value: [] };
+  if (!Array.isArray(value) || value.some((tag) => typeof tag !== "string")) {
+    return { error: "Tags must be a list of words." };
+  }
+  return {
+    value: value.map((tag) => tag.trim()).filter((tag) => tag.length > 0),
+  };
+}
+
+function toSummary(row: HymnRow) {
+  return {
+    id: String(row.id),
+    title: String(row.title ?? ""),
+    author: String(row.author ?? ""),
+  };
+}
+
+async function toHymn(row: HymnRow) {
+  return {
+    ...toSummary(row),
+    lyrics: String(row.lyrics ?? ""),
+    imageUrls: await imageUrls(row.imagePaths),
+    tags: asTags(row.tags),
+    library: row.library == null || row.library === "" ? null : String(row.library),
+    link: row.link == null || row.link === "" ? null : String(row.link),
+    createdAt: asTimestamp(row.created),
+    updatedAt: asTimestamp(row.updated),
+  };
+}
+
+async function imageUrls(value: unknown): Promise<string[]> {
+  const paths = asTags(value);
+  return Promise.all(paths.map((path) => resolveImageUrl(path)));
+}
+
+function asTags(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((tag) => String(tag));
+  if (typeof value === "string" && value.length > 0) {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (Array.isArray(parsed)) return parsed.map((tag) => String(tag));
+    } catch {
+      return value
+        .replace(/^\{|\}$/g, "")
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter((tag) => tag.length > 0);
+    }
+  }
+  return [];
+}
+
+function asTimestamp(value: unknown): string {
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "string") return value;
+  return "";
+}
+
+function sendFailure(res: Response, status: number, error: string) {
+  res.status(status).json({ success: false, error });
+}
+
+function sendLibraryError(res: Response, error: unknown) {
+  console.error(error);
+  const denied = error !== null && typeof error === "object" && "Code" in error && error.Code === "AccessDenied";
+  if (denied) {
+    sendFailure(res, 403, "The bucket refused that file. This account needs permission to store images.");
+    return;
+  }
+  sendFailure(res, 500, "The hymn library could not be reached.");
+}
+
+export { hymns };

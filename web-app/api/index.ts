@@ -1,7 +1,8 @@
 import express, { type Request, type Response, type NextFunction } from "express";
 import "dotenv/config";
 import { goodCursor } from "./includes/good_cursor.ts";
-import dotenv from 'dotenv';
+import dotenv from "dotenv";
+import { hymns } from "./hymns.ts";
 
 dotenv.config({ path: '../.env' });
 
@@ -31,10 +32,18 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 
 
-app.get("/", (req, res) => {
+app.get("/", (_req, res) => {
     res.send("Hello World");
 });
 
-app.get("/:model/:method", (req, res) => {});
+app.use("/api/hymns", hymns);
+
+app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    console.error(error);
+    if (res.headersSent) {
+        return;
+    }
+    res.status(500).json({ success: false, error: "The hymn library could not be reached." });
+});
 
 export default app;

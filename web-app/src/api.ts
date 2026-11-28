@@ -15,7 +15,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: {
       Accept: "application/json",
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(init?.body && !(init.body instanceof File) ? { "Content-Type": "application/json" } : {}),
+      ...init?.headers,
     },
   });
 
@@ -49,6 +50,18 @@ export function updateHymn(id: string, draft: HymnDraft) {
   return request<Hymn>(`/api/hymns/${encodeURIComponent(id)}`, {
     method: "PUT",
     body: JSON.stringify(toPayload(draft)),
+  });
+}
+
+export function uploadHymnImage(id: string, file: File) {
+  return request<Hymn>(`/api/hymns/${encodeURIComponent(id)}/image`, {
+    method: "POST",
+    body: file,
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "image/webp",
+      "X-File-Name": file.name,
+    },
   });
 }
 

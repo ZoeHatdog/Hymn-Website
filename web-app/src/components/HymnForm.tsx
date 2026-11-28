@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { uploadHymnImage } from "../api";
 import type { HymnDraft } from "../types";
 
 const emptyDraft: HymnDraft = {
@@ -10,22 +11,29 @@ const emptyDraft: HymnDraft = {
   link: "",
 };
 
+const libraries = ["TBC", "Rejoice"] as const;
+
 const fieldCopy = {
   title: "The title is empty. A hymn is filed under its title.",
   author: "The author is empty. The library records who wrote it.",
+  library: "Choose TBC or Rejoice.",
   lyrics: "The lyrics are empty. Type or paste the words of the hymn.",
   link: "That link is not a full URL. Include https://.",
 } as const;
 
 interface HymnFormProps {
+  hymnId?: string;
   initial?: HymnDraft;
   submitLabel: string;
   onSubmit: (draft: HymnDraft) => Promise<unknown>;
   onSuccess?: () => void;
 }
 
-export function HymnForm({ initial = emptyDraft, submitLabel, onSubmit, onSuccess }: HymnFormProps) {
+export function HymnForm({ hymnId, initial = emptyDraft, submitLabel, onSubmit, onSuccess }: HymnFormProps) {
   const [draft, setDraft] = useState(initial);
+  const [sheet, setSheet] = useState<File | null>(null);
+  const [sheetError, setSheetError] = useState("");
+  const [uploadState, setUploadState] = useState<"" | "loading" | "success">("");
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [note, setNote] = useState("");
@@ -49,10 +57,11 @@ export function HymnForm({ initial = emptyDraft, submitLabel, onSubmit, onSucces
     const nextErrors = {
       title: validate("title", draft.title),
       author: validate("author", draft.author),
+      library: validate("library", draft.library),
       lyrics: validate("lyrics", draft.lyrics),
       link: validate("link", draft.link),
     };
-    setTouched({ title: true, author: true, lyrics: true, link: true });
+    setTouched({ title: true, author: true, library: true, lyrics: true, link: true });
     setErrors(nextErrors);
     if (Object.values(nextErrors).some(Boolean)) {
       setSaveState("");
@@ -64,7 +73,15 @@ export function HymnForm({ initial = emptyDraft, submitLabel, onSubmit, onSucces
     setNote("");
     setNoteKind("");
     try {
-      await onSubmit(draft);
+      const saved = await onSubmit(draft);
+      const id = hymnId || savedId(saved);
+      if (sheet) {
+        if (!id) {
+          throw new Error("The hymn was saved, but the sheet image had nowhere to go.");
+        }
+        await uploadHymnImage(id, sheet);
+        setSheet(null);
+      }
       setSaveState("success");
       setNote("Saved.");
       setNoteKind("success");
@@ -104,8 +121,11 @@ export function HymnForm({ initial = emptyDraft, submitLabel, onSubmit, onSucces
         id="library"
         label="Library"
         value={draft.library}
-        placeholder="Rejoice"
-        onBlur={() => undefined}
+        required
+        options={libraries}
+        error={errors.library}
+        success={touched.library && !errors.library}
+        onBlur={() => markTouched("library", draft.library)}
         onChange={(value) => update("library", value)}
       />
       <Field
@@ -138,6 +158,36 @@ export function HymnForm({ initial = emptyDraft, submitLabel, onSubmit, onSucces
         onBlur={() => markTouched("lyrics", draft.lyrics)}
         onChange={(value) => update("lyrics", value)}
       />
+      <div className="sheet">
+        <label htmlFor="sheet">
+          Sheet image
+          <span className="field" data-state={sheetError ? "error" : sheet ? "success" : undefined}>
+            <input
+              id="sheet"
+              name="sheet"
+              type="file"
+              accept=".webp,image/webp"
+              aria-describedby="sheet-help"
+              onChange={(event) => chooseSheet(event.target.files?.[0] ?? null)}
+            />
+            <span className="mark" aria-hidden="true" />
+          </span>
+          <span className="helper" id="sheet-help" data-kind={sheetError ? undefined : "hint"}>
+            {sheetError || (sheet ? sheet.name : "Only .webp files.")}
+          </span>
+        </label>
+        <div className="actions">
+          <button
+            className="btn btn-quiet"
+            type="button"
+            data-state={uploadState || undefined}
+            disabled={!sheet || uploadState === "loading" || saveState === "loading"}
+            onClick={() => void uploadSheet()}
+          >
+            {uploadState === "loading" ? "Uploading…" : uploadState === "success" ? "Uploaded" : "Upload"}
+          </button>
+        </div>
+      </div>
       <p className="form-note" data-kind={noteKind || undefined} role="status">
         {note}
       </p>
@@ -149,17 +199,72 @@ export function HymnForm({ initial = emptyDraft, submitLabel, onSubmit, onSucces
     </form>
   );
 
+  function chooseSheet(file: File | null) {
+    setUploadState("");
+    if (!file) {
+      setSheet(null);
+      setSheetError("");
+      return;
+    }
+    const problem = webpProblem(file);
+    setSheet(problem ? null : file);
+    setSheetError(problem);
+  }
+
+  async function uploadSheet() {
+    const problem = sheet ? webpProblem(sheet) : "Choose a .webp file.";
+    if (!sheet || problem) {
+      setSheetError(problem);
+      return;
+    }
+    if (!hymnId) {
+      setNote("This sheet will upload when you save the hymn.");
+      setNoteKind("");
+      return;
+    }
+    setUploadState("loading");
+    setNote("");
+    setNoteKind("");
+    try {
+      await uploadHymnImage(hymnId, sheet);
+      setSheet(null);
+      setUploadState("success");
+      setNote("Uploaded.");
+      setNoteKind("success");
+    } catch (error) {
+      setUploadState("");
+      setNoteKind("error");
+      setNote(error instanceof Error ? error.message : "The sheet was not uploaded.");
+    }
+  }
+
   function markTouched(name: keyof typeof fieldCopy, value: string) {
     setTouched((current) => ({ ...current, [name]: true }));
     setErrors((current) => ({ ...current, [name]: validate(name, value) }));
   }
 }
 
+function webpProblem(file: File): string {
+  const namedWebp = file.name.toLowerCase().endsWith(".webp");
+  const typedWebp = file.type === "" || file.type === "image/webp";
+  return namedWebp && typedWebp ? "" : "Only .webp files can be uploaded.";
+}
+
+function savedId(value: unknown): string {
+  if (value && typeof value === "object" && "id" in value && typeof (value as { id: unknown }).id === "string") {
+    return (value as { id: string }).id;
+  }
+  return "";
+}
+
 function isCheckedField(name: keyof HymnDraft): name is keyof typeof fieldCopy {
-  return name === "title" || name === "author" || name === "lyrics" || name === "link";
+  return name === "title" || name === "author" || name === "library" || name === "lyrics" || name === "link";
 }
 
 function validate(name: keyof typeof fieldCopy, value: string) {
+  if (name === "library") {
+    return libraries.includes(value as (typeof libraries)[number]) ? "" : fieldCopy.library;
+  }
   if (name === "link") {
     if (!value.trim()) {
       return "";
@@ -182,13 +287,14 @@ interface FieldProps {
   multiline?: boolean;
   type?: string;
   placeholder?: string;
+  options?: readonly string[];
   error?: string;
   success?: boolean;
   onChange: (value: string) => void;
   onBlur: () => void;
 }
 
-function Field({ id, label, value, required, multiline, type = "text", placeholder, error, success, onChange, onBlur }: FieldProps) {
+function Field({ id, label, value, required, multiline, type = "text", placeholder, options, error, success, onChange, onBlur }: FieldProps) {
   const state = error ? "error" : success ? "success" : undefined;
   const controlProps = {
     id,
@@ -207,7 +313,20 @@ function Field({ id, label, value, required, multiline, type = "text", placehold
     <label htmlFor={id}>
       {label}
       <span className="field" data-state={state}>
-        {multiline ? <textarea {...controlProps} rows={8} /> : <input {...controlProps} type={type} autoComplete={type === "url" ? "url" : "off"} />}
+        {options ? (
+          <select {...controlProps} value={value}>
+            <option value="">Choose a library</option>
+            {options.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        ) : multiline ? (
+          <textarea {...controlProps} rows={8} />
+        ) : (
+          <input {...controlProps} type={type} autoComplete={type === "url" ? "url" : "off"} />
+        )}
         <span className="mark" aria-hidden="true" />
       </span>
       <span className="helper" id={`${id}-help`}>

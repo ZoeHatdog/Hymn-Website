@@ -17,5 +17,6 @@
     "noFallthroughCasesInSwitch": true,
     "types": ["vite/client"]
   },
-  "include": ["src", "api/includes/mapi/includes/db, "api/db"]
+  "include": ["src", "api"]
+  
 }

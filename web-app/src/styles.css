@@ -192,6 +192,7 @@ label {
 }
 
 input,
+select,
 textarea {
   width: 100%;
   min-height: var(--control-height);
@@ -211,6 +212,15 @@ textarea {
 textarea {
   min-height: 12rem;
   resize: vertical;
+}
+
+input[type="file"] {
+  padding: var(--space-xs) var(--space-sm);
+}
+
+.sheet {
+  display: grid;
+  gap: var(--space-sm);
 }
 
 input::placeholder,
@@ -239,6 +249,10 @@ textarea::placeholder {
   line-height: 1.4;
 }
 
+.helper[data-kind="hint"] {
+  color: var(--color-muted);
+}
+
 .field[data-state="error"] .mark::before {
   content: "!";
   color: var(--color-error);
@@ -250,12 +264,14 @@ textarea::placeholder {
 }
 
 .field[data-state="error"] input,
+.field[data-state="error"] select,
 .field[data-state="error"] textarea {
   border-color: var(--color-error);
   background: var(--color-error-soft);
 }
 
 .field[data-state="success"] input,
+.field[data-state="success"] select,
 .field[data-state="success"] textarea {
   border-color: var(--color-primary);
 }
@@ -314,6 +330,7 @@ textarea::placeholder {
 .mast-links a:focus-visible,
 .index a:focus-visible,
 input:focus-visible,
+select:focus-visible,
 textarea:focus-visible {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
@@ -322,6 +339,7 @@ textarea:focus-visible {
 
 .btn:disabled,
 input:disabled,
+select:disabled,
 textarea:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -479,6 +497,7 @@ textarea:disabled {
   }
 
   input:hover,
+  select:hover,
   textarea:hover {
     background: var(--color-paper-2);
   }

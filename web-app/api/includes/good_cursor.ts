@@ -175,6 +175,48 @@ function fieldType(def: FieldDef): string {
   return Array.isArray(def) ? def[0] : def.type;
 }
 
+function sqlLiteral(fields: Record<string, FieldDef>, field: string, value: unknown): string {
+  const def = fields[field];
+  if (!def) {
+    return dollarQuote(value, "gc");
+  }
+  const type = fieldType(def);
+  if (value == null) {
+    return "NULL";
+  }
+  if (type === "integer") {
+    const parsed = typeof value === "number" ? value : Number(String(value).trim());
+    if (!Number.isInteger(parsed)) {
+      throw new Error("Expected an integer for " + field);
+    }
+    return String(parsed);
+  }
+  if (type === "array") {
+    const items = Array.isArray(value) ? value : [value];
+    if (items.length === 0) {
+      return "ARRAY[]::text[]";
+    }
+    return "ARRAY[" + items.map((item) => dollarQuote(item, "gc")).join(", ") + "]::text[]";
+  }
+  if (type === "json") {
+    return dollarQuote(JSON.stringify(value), "gc_js") + "::jsonb";
+  }
+  if (type === "date") {
+    return dollarQuote(value, "gc") + "::timestamptz";
+  }
+  return dollarQuote(value, "gc_def");
+}
+
+function quoteIdent(name: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    throw new Error("Invalid identifier: " + name);
+  }
+  if (/[A-Z]/.test(name)) {
+    return '"' + name + '"';
+  }
+  return name;
+}
+
 function tableRef(model: Model): string {
   const table = model.table ?? model.table_name;
   if (!table) {
@@ -215,12 +257,7 @@ function buildFieldValue(fields: Record<string, FieldDef>, qryField: string, qry
     return false;
   }
 
-  let value: string;
-  if (fieldType(fields[qryField]) === "json") {
-    value = dollarQuote(JSON.stringify(qryValue), "gc_js");
-  } else {
-    value = dollarQuote(qryValue, "gc_def");
-  }
+  const value = sqlLiteral(fields, qryField, qryValue);
 
   if (typeof qryValue === "string" && qryValue.length === 0) {
     return "NULL";
@@ -236,7 +273,7 @@ function buildInsert(model: Model, qryRows: Row, qryReturnField: string | null):
   for (const field of Object.keys(qryRows)) {
     const value = buildFieldValue(model.fields, field, qryRows[field]);
     if (value) {
-      keys.push(field);
+      keys.push(quoteIdent(field));
       values.push(value);
     }
   }
@@ -245,10 +282,11 @@ function buildInsert(model: Model, qryRows: Row, qryReturnField: string | null):
     return false;
   }
 
-  const returnKey =
+  const returnKey = quoteIdent(
     qryReturnField && Object.prototype.hasOwnProperty.call(model.fields, qryReturnField)
       ? qryReturnField
-      : model.primary_key;
+      : model.primary_key,
+  );
 
   let sql = "INSERT INTO " + tableRef(model);
   sql += " ( " + keys.join(", ") + " )";
@@ -263,19 +301,19 @@ function buildUpdate(model: Model, qryRows: Row, qryCriteria?: Criteria): string
   for (const field of Object.keys(qryRows)) {
     const value = buildFieldValue(model.fields, field, qryRows[field]);
     if (value) {
-      assignments.push(field + "=" + value);
+      assignments.push(quoteIdent(field) + "=" + value);
     }
   }
 
   let sql = "UPDATE " + tableRef(model);
   sql += " SET " + assignments.join(", ");
   sql += buildWhere(model, qryCriteria);
-  sql += " RETURNING " + model.primary_key;
+  sql += " RETURNING " + quoteIdent(model.primary_key);
   return sql;
 }
 
 function buildDelete(model: Model, qryCriteria?: Criteria): string {
-  return "DELETE FROM " + tableRef(model) + buildWhere(model, qryCriteria);
+  return "DELETE FROM " + tableRef(model) + buildWhere(model, qryCriteria) + " RETURNING " + quoteIdent(model.primary_key);
 }
 
 function buildSelect(
@@ -286,7 +324,7 @@ function buildSelect(
   qryLimit?: number | null,
   qryPagination?: boolean,
 ): string {
-  const columns = Object.keys(model.fields);
+  const columns = Object.keys(model.fields).map(quoteIdent);
 
   let sql = "SELECT " + columns.join(", ");
   sql += buildFrom(model);
@@ -308,12 +346,13 @@ function buildSelectTotals(model: Model, apiParams?: ApiParams, qryCriteria?: Cr
     }
   }
 
-  const columns = ["COUNT(" + model.primary_key + ") as count"];
+  const columns = ["COUNT(" + quoteIdent(model.primary_key) + ") as count"];
   for (const [field, fn] of Array.from(totals.entries())) {
+    const column = quoteIdent(field);
     if (fn === "avg") {
-      columns.push("AVG(" + field + ") as " + field);
+      columns.push("AVG(" + column + ") as " + column);
     } else {
-      columns.push("SUM(" + field + ") as " + field);
+      columns.push("SUM(" + column + ") as " + column);
     }
   }
 
@@ -361,7 +400,7 @@ function buildWhereArgs(model: Model, qryField: string, qryValue: unknown): stri
   if (qryValue != null && isWhereClause(qryValue)) {
     switch (qryValue.type) {
       case "whereRaw":
-        return qryField + " " + allowedOperator(qryValue.operator) + " " + String(qryValue.value);
+        return quoteIdent(qryField) + " " + allowedOperator(qryValue.operator) + " " + String(qryValue.value);
       case "whereArray": {
         const parts: string[] = [];
         if (isObject(qryValue.value)) {
@@ -371,23 +410,23 @@ function buildWhereArgs(model: Model, qryField: string, qryValue: unknown): stri
           }
         } else if (Array.isArray(qryValue.value)) {
           for (const item of qryValue.value) {
-            parts.push(qryField + " = " + dollarQuote(item, "gc"));
+            parts.push(quoteIdent(qryField) + " = " + sqlLiteral(model.fields, qryField, item));
           }
         }
         return "(" + parts.join(" " + allowedOperator(qryValue.operator) + " ") + ")";
       }
       case "where":
       default:
-        return qryField + " " + allowedOperator(qryValue.operator) + " " + dollarQuote(qryValue.value, "gc");
+        return quoteIdent(qryField) + " " + allowedOperator(qryValue.operator) + " " + sqlLiteral(model.fields, qryField, qryValue.value);
     }
   }
 
   if (qryValue == null && Object.prototype.hasOwnProperty.call(model.fields, qryField)) {
-    return qryField + " IS NULL";
+    return quoteIdent(qryField) + " IS NULL";
   }
 
   if (Object.prototype.hasOwnProperty.call(model.fields, qryField)) {
-    return qryField + " = " + dollarQuote(qryValue, "gc");
+    return quoteIdent(qryField) + " = " + sqlLiteral(model.fields, qryField, qryValue);
   }
 
   return false;
@@ -408,7 +447,7 @@ function orderFragments(model: Model, raw: OrderInput): string[] {
     if (!field || !Object.prototype.hasOwnProperty.call(model.fields, field)) continue;
     const dir = (direction ?? "ASC").toUpperCase();
     if (dir !== "ASC" && dir !== "DESC") continue;
-    out.push(field + " " + dir);
+    out.push(quoteIdent(field) + " " + dir);
   }
   return out;
 }
@@ -424,7 +463,7 @@ function buildOrder(model: Model, apiParams?: ApiParams, qryOrder?: OrderInput):
       if (!Object.prototype.hasOwnProperty.call(model.fields, name)) return [];
       const dir = (dirs[index] ?? "ASC").trim().toUpperCase();
       if (dir !== "ASC" && dir !== "DESC") return [];
-      return [name + " " + dir];
+      return [quoteIdent(name) + " " + dir];
     });
   }
 
