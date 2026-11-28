@@ -1,4 +1,5 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useAuth } from "../auth";
 
 const links = [
   { to: "/view", label: "View" },
@@ -8,6 +9,9 @@ const links = [
 ];
 
 export function Shell() {
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
+
   return (
     <>
       <header className="mast">
@@ -22,6 +26,18 @@ export function Shell() {
             </li>
           ))}
         </ul>
+        <div className="mast-account">
+          <p>{user?.email}</p>
+          <button
+            className="btn btn-quiet"
+            type="button"
+            onClick={() => {
+              void signOut().then(() => navigate("/login", { replace: true }));
+            }}
+          >
+            Sign out
+          </button>
+        </div>
       </header>
       <main className="sheet">
         <Outlet />

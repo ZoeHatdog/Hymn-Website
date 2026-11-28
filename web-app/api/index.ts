@@ -2,6 +2,7 @@ import express, { type Request, type Response, type NextFunction } from "express
 import "dotenv/config";
 import { goodCursor } from "./includes/good_cursor.ts";
 import dotenv from "dotenv";
+import { auth } from "./auth.ts";
 import { hymns } from "./hymns.ts";
 
 dotenv.config({ path: '../.env' });
@@ -36,6 +37,7 @@ app.get("/", (_req, res) => {
     res.send("Hello World");
 });
 
+app.use("/api/auth", auth);
 app.use("/api/hymns", hymns);
 
 app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {

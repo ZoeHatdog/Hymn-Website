@@ -2,6 +2,7 @@ import express from "express";
 import request from "supertest";
 import { jest } from "@jest/globals";
 import type { Router } from "express";
+import { signSession } from "../api/includes/auth/session.ts";
 import { isWebp } from "../api/includes/bucket.ts";
 
 type Row = Record<string, unknown> & { id: string };
@@ -76,6 +77,10 @@ function hymn(id: string, extra: Record<string, unknown> = {}): Row {
   };
 }
 
+function keeperCookie() {
+  return `hymn_session=${signSession({ email: "keeper@example.com", name: "Keeper" })}`;
+}
+
 function testApp(router: Router) {
   const app = express();
   app.use(express.json());
@@ -126,8 +131,16 @@ describe("hymn CRUD", () => {
     expect(response.body.error).toBe("That hymn is not in the library.");
   });
 
-  it("creates a hymn", async () => {
+  it("refuses to create a hymn without a session", async () => {
     const response = await request(app).post("/api/hymns").send(draft);
+
+    expect(response.status).toBe(401);
+    expect(response.body.error).toBe("Sign in to change the library.");
+    expect(store.has("created-id")).toBe(false);
+  });
+
+  it("creates a hymn", async () => {
+    const response = await request(app).post("/api/hymns").set("Cookie", keeperCookie()).send(draft);
 
     expect(response.status).toBe(201);
     expect(response.body.data).toMatchObject({ id: "created-id", title: "Amazing Grace", library: "TBC" });
@@ -135,14 +148,14 @@ describe("hymn CRUD", () => {
   });
 
   it("rejects a library other than TBC or Rejoice", async () => {
-    const response = await request(app).post("/api/hymns").send({ ...draft, library: "Other" });
+    const response = await request(app).post("/api/hymns").set("Cookie", keeperCookie()).send({ ...draft, library: "Other" });
 
     expect(response.status).toBe(400);
     expect(response.body.error).toBe("Choose TBC or Rejoice.");
   });
 
   it("rejects a hymn with no title", async () => {
-    const response = await request(app).post("/api/hymns").send({ ...draft, title: " " });
+    const response = await request(app).post("/api/hymns").set("Cookie", keeperCookie()).send({ ...draft, title: " " });
 
     expect(response.status).toBe(400);
     expect(response.body.error).toBe("A title is required.");
@@ -151,6 +164,7 @@ describe("hymn CRUD", () => {
   it("updates a hymn", async () => {
     const response = await request(app)
       .put("/api/hymns/hymn1")
+      .set("Cookie", keeperCookie())
       .send({ ...draft, title: "Corrected title", library: "Rejoice" });
 
     expect(response.status).toBe(200);
@@ -160,7 +174,7 @@ describe("hymn CRUD", () => {
   });
 
   it("deletes a hymn", async () => {
-    const response = await request(app).delete("/api/hymns/hymn1");
+    const response = await request(app).delete("/api/hymns/hymn1").set("Cookie", keeperCookie());
 
     expect(response.status).toBe(200);
     expect(response.body.data).toEqual({ id: "hymn1" });
@@ -177,6 +191,7 @@ describe("webp upload", () => {
   it("stores a webp sheet on the hymn", async () => {
     const response = await request(app)
       .post("/api/hymns/hymn1/image")
+      .set("Cookie", keeperCookie())
       .set("Content-Type", "image/webp")
       .set("X-File-Name", "sheet.webp")
       .send(webp);
@@ -192,6 +207,7 @@ describe("webp upload", () => {
   it("rejects a file that is not webp", async () => {
     const response = await request(app)
       .post("/api/hymns/hymn1/image")
+      .set("Cookie", keeperCookie())
       .set("Content-Type", "image/webp")
       .set("X-File-Name", "notes.png")
       .send(Buffer.from("not a webp"));
@@ -204,6 +220,7 @@ describe("webp upload", () => {
   it("returns 404 when the hymn for the sheet does not exist", async () => {
     const response = await request(app)
       .post("/api/hymns/missing/image")
+      .set("Cookie", keeperCookie())
       .set("Content-Type", "image/webp")
       .send(webp);
 

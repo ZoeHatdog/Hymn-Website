@@ -10,8 +10,14 @@ interface ApiFailure {
   error?: string;
 }
 
+export type DeskUser = {
+  email: string;
+  name: string;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
+    credentials: "same-origin",
     ...init,
     headers: {
       Accept: "application/json",
@@ -32,6 +38,28 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return body.data;
+}
+
+export function currentSession() {
+  return request<DeskUser>("/api/auth/session");
+}
+
+export function requestLoginCode(email: string) {
+  return request<{ email: string }>("/api/auth/code", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export function verifyLoginCode(email: string, code: string) {
+  return request<DeskUser>("/api/auth/code/verify", {
+    method: "POST",
+    body: JSON.stringify({ email, code }),
+  });
+}
+
+export function endSession() {
+  return request<unknown>("/api/auth/logout", { method: "POST" });
 }
 
 export function listHymns() {

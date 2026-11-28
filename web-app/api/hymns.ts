@@ -1,4 +1,5 @@
 import express, { Router, type Response } from "express";
+import { requireSession } from "./includes/auth/require.ts";
 import { isWebp, putImage, resolveImageUrl } from "./includes/bucket.ts";
 import { goodCursor } from "./includes/good_cursor.ts";
 import { default_sort, fields, primary_key, schema, table } from "./includes/models/hymn.js";
@@ -17,6 +18,14 @@ type HymnBody = {
 };
 
 const hymns = Router();
+
+hymns.use((req, res, next) => {
+  if (req.method === "GET" || req.method === "HEAD") {
+    next();
+    return;
+  }
+  requireSession(req, res, next);
+});
 
 hymns.get("/", async (_req, res) => {
   try {

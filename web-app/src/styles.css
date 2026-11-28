@@ -456,6 +456,47 @@ textarea:disabled {
   border-radius: var(--radius-md);
 }
 
+.mast-account {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: var(--space-sm);
+  margin: 0 0 var(--space-sm);
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+}
+
+.mast-account .btn {
+  min-height: var(--space-xl);
+  padding-inline: var(--space-sm);
+}
+
+.code-input {
+  letter-spacing: 0.3em;
+  text-align: center;
+}
+
+.login-or {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-sm);
+  margin: var(--space-md) 0 0;
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+}
+
+.login-or::before,
+.login-or::after {
+  content: "";
+  border-top: var(--rule-hair) solid var(--color-rule);
+}
+
+.btn-block {
+  width: 100%;
+}
+
 .sheet > .actions {
   margin-top: var(--space-lg);
 }
