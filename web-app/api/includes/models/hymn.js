@@ -6,6 +6,7 @@ export const fields = {
     imagePaths: { type: "array", required: false },
     tags: { type: "array", required: true },
     library: { type: "string", required: true },
+    page: { type: "number", required: true },
     link: { type: "string", required: true },
     created: { type: "date", required: true },
     updated: { type: "date", required: true },

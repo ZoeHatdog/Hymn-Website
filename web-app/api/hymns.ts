@@ -13,6 +13,7 @@ type HymnBody = {
   author?: unknown;
   lyrics?: unknown;
   library?: unknown;
+  page?: unknown;
   link?: unknown;
   tags?: unknown;
 };
@@ -56,6 +57,10 @@ hymns.post("/", async (req, res) => {
       sendFailure(res, 400, parsed.error ?? "The hymn could not be saved.");
       return;
     }
+    if (await pageTaken(String(parsed.row.library), Number(parsed.row.page))) {
+      sendFailure(res, 409, pageTakenMessage(String(parsed.row.library), Number(parsed.row.page)));
+      return;
+    }
 
     const now = goodCursor.buildNestedQuery("CURRENT_TIMESTAMP");
     const inserted = await goodCursor.insert(hymnModel, {
@@ -88,9 +93,18 @@ hymns.post("/:id/image", express.raw({ type: "image/webp", limit: "12mb" }), asy
       return;
     }
 
-    const key = imageKey(String(existing.id), headerName(req.headers["x-file-name"]));
+    const page = asPage(existing.page);
+    const library = typeof existing.library === "string" ? existing.library.trim() : "";
+    const title = typeof existing.title === "string" ? existing.title.trim() : "";
+    if (!library || !title || page == null) {
+      sendFailure(res, 400, "Save the library, title, and hymn number before uploading a sheet.");
+      return;
+    }
+
+    const key = imageKey(library, title, page);
     await putImage(key, body);
-    const paths = [...asTags(existing.imagePaths), key];
+    const paths = asTags(existing.imagePaths);
+    if (!paths.includes(key)) paths.push(key);
     await goodCursor.update(
       hymnModel,
       { imagePaths: paths, updated: goodCursor.buildNestedQuery("CURRENT_TIMESTAMP") },
@@ -118,6 +132,10 @@ hymns.put("/:id", async (req, res) => {
     const parsed = readHymn(req.body);
     if (parsed.error || !parsed.row) {
       sendFailure(res, 400, parsed.error ?? "The hymn could not be saved.");
+      return;
+    }
+    if (await pageTaken(String(parsed.row.library), Number(parsed.row.page), String(existing.id))) {
+      sendFailure(res, 409, pageTakenMessage(String(parsed.row.library), Number(parsed.row.page)));
       return;
     }
 
@@ -161,19 +179,20 @@ async function findHymn(rawId: unknown): Promise<HymnRow | null> {
   return rows[0] ?? null;
 }
 
-function headerName(value: unknown): string {
-  const raw = Array.isArray(value) ? value[0] : value;
-  return typeof raw === "string" ? raw : "";
+async function pageTaken(library: string, page: number, exceptId?: string): Promise<boolean> {
+  const rows = await goodCursor.getOne(hymnModel, undefined, { library, page });
+  const found = rows[0];
+  if (!found) return false;
+  return String(found.id) !== exceptId;
 }
 
-function imageKey(id: string, filename: string): string {
-  const base = filename
-    .trim()
-    .replace(/\.webp$/i, "")
-    .replace(/[^A-Za-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-  return `uploads/${id}/${base || "sheet"}-${Date.now()}.webp`;
+function pageTakenMessage(library: string, page: number): string {
+  return library + " already has hymn number " + page + ".";
+}
+
+function imageKey(library: string, title: string, page: number): string {
+  const name = title.replace(/[\\/]/g, " ").replace(/\s+/g, " ").trim() + " - " + page;
+  return library + "/" + name + "/" + name + ".webp";
 }
 
 function parseId(rawId: unknown): string | null {
@@ -206,6 +225,9 @@ function readHymn(body: unknown): { row?: HymnRow; error?: string } {
   }
   if (link.error) return { error: link.error };
 
+  const page = readPage(input.page);
+  if (page.error || page.value == null) return { error: page.error ?? "A page number is required." };
+
   const tags = readTags(input.tags);
   if (tags.error || !tags.value) return { error: tags.error ?? "Tags must be a list of words." };
 
@@ -215,10 +237,19 @@ function readHymn(body: unknown): { row?: HymnRow; error?: string } {
       author,
       lyrics,
       library: library.value,
+      page: page.value,
       link: link.value,
       tags: tags.value,
     },
   };
+}
+
+function readPage(value: unknown): { value?: number; error?: string } {
+  const parsed = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value.trim()) : Number.NaN;
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    return { error: "A page number is required." };
+  }
+  return { value: parsed };
 }
 
 function requiredText(value: unknown): string | null {
@@ -249,6 +280,8 @@ function toSummary(row: HymnRow) {
     id: String(row.id),
     title: String(row.title ?? ""),
     author: String(row.author ?? ""),
+    library: row.library == null || row.library === "" ? null : String(row.library),
+    page: asPage(row.page),
   };
 }
 
@@ -268,6 +301,11 @@ async function toHymn(row: HymnRow) {
 async function imageUrls(value: unknown): Promise<string[]> {
   const paths = asTags(value);
   return Promise.all(paths.map((path) => resolveImageUrl(path)));
+}
+
+function asPage(value: unknown): number | null {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(parsed) ? parsed : null;
 }
 
 function asTags(value: unknown): string[] {

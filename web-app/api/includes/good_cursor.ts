@@ -184,7 +184,7 @@ function sqlLiteral(fields: Record<string, FieldDef>, field: string, value: unkn
   if (value == null) {
     return "NULL";
   }
-  if (type === "integer") {
+  if (type === "integer" || type === "number") {
     const parsed = typeof value === "number" ? value : Number(String(value).trim());
     if (!Number.isInteger(parsed)) {
       throw new Error("Expected an integer for " + field);
