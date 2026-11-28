@@ -1,5 +1,6 @@
 import { Route, Routes } from "react-router-dom";
 import { AuthProvider } from "./auth";
+import { ErrorBoundary, ErrorNotices } from "./components/ErrorNotices";
 import { RequireAuth } from "./components/RequireAuth";
 import { Shell } from "./components/Shell";
 import { AddPage } from "./pages/AddPage";
@@ -12,6 +13,8 @@ import { ViewPage } from "./pages/ViewPage";
 export function App() {
   return (
     <AuthProvider>
+      <ErrorNotices />
+      <ErrorBoundary>
       <Routes>
         <Route path="login" element={<LoginPage />} />
         <Route element={<RequireAuth />}>
@@ -26,6 +29,7 @@ export function App() {
           </Route>
         </Route>
       </Routes>
+      </ErrorBoundary>
     </AuthProvider>
   );
 }

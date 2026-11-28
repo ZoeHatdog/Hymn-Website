@@ -1,3 +1,4 @@
+import { reportError } from "./notices";
 import type { Hymn, HymnDraft, HymnSummary } from "./types";
 
 interface ApiSuccess<T> {
@@ -16,28 +17,40 @@ export type DeskUser = {
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    credentials: "same-origin",
-    ...init,
-    headers: {
-      Accept: "application/json",
-      ...(init?.body && !(init.body instanceof File) ? { "Content-Type": "application/json" } : {}),
-      ...init?.headers,
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      credentials: "same-origin",
+      ...init,
+      headers: {
+        Accept: "application/json",
+        ...(init?.body && !(init.body instanceof File) ? { "Content-Type": "application/json" } : {}),
+        ...init?.headers,
+      },
+    });
+  } catch {
+    fail(path, 0, "The hymn library could not be reached.");
+  }
 
   let body: ApiSuccess<T> | ApiFailure;
   try {
     body = (await response.json()) as ApiSuccess<T> | ApiFailure;
   } catch {
-    throw new Error("The hymn API returned an unexpected response.");
+    fail(path, response.ok ? 500 : response.status, "The hymn API returned an unexpected response.");
   }
 
   if (!response.ok || !body.success) {
-    throw new Error(body.success ? "The hymn API rejected that request." : (body.error ?? "The hymn API rejected that request."));
+    const message = body.success ? "The hymn API rejected that request." : (body.error ?? "The hymn API rejected that request.");
+    fail(path, response.status, message);
   }
 
   return body.data;
+}
+
+function fail(path: string, status: number, message: string): never {
+  const quietSignIn = path === "/api/auth/session" && status === 401;
+  if (!quietSignIn) reportError(message);
+  throw new Error(message);
 }
 
 export function currentSession() {
@@ -103,6 +116,7 @@ function toPayload(draft: HymnDraft) {
     author: draft.author.trim(),
     lyrics: draft.lyrics.trim(),
     library: draft.library.trim() || null,
+    page: Number(draft.page),
     link: draft.link.trim() || null,
     tags: draft.tags
       .split(",")

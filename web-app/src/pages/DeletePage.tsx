@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { listHymns, removeHymn } from "../api";
+import { reportNotice, reportSuccess } from "../notices";
+import { hymnChoice, hymnMatch } from "../hymnLabel";
 import type { HymnSummary } from "../types";
 
 export function DeletePage() {
@@ -39,7 +41,7 @@ export function DeletePage() {
     if (!needle) {
       return hymns;
     }
-    return hymns.filter((hymn) => `${hymn.title} ${hymn.author}`.toLowerCase().includes(needle));
+    return hymns.filter((hymn) => hymnMatch(hymn, needle));
   }, [hymns, query]);
 
   const count = shown.length === 1 ? "1 hymn" : `${shown.length} hymns`;
@@ -55,6 +57,7 @@ export function DeletePage() {
     if (armedId !== hymn.id) {
       setArmedId(hymn.id);
       setFailedId("");
+      reportNotice(`Click Delete again to remove “${hymn.title}”.`);
       return;
     }
     setPendingId(hymn.id);
@@ -63,6 +66,7 @@ export function DeletePage() {
       await removeHymn(hymn.id);
       setHymns((current) => current.filter((item) => item.id !== hymn.id));
       setArmedId("");
+      reportSuccess(`“${hymn.title}” is removed.`);
     } catch (error) {
       setFailedId(hymn.id);
       setStatus(error instanceof Error ? error.message : "That hymn was not deleted.");
@@ -87,7 +91,7 @@ export function DeletePage() {
               id="query"
               type="search"
               autoComplete="off"
-              placeholder="Title or author"
+              placeholder="Title, library, or number"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
@@ -127,7 +131,7 @@ export function DeletePage() {
               <li key={hymn.id}>
                 <div>
                   <strong>{hymn.title}</strong>
-                  <p>{hymn.author}</p>
+                  <p>{hymnChoice(hymn)}</p>
                 </div>
                 <button
                   className="btn btn-quiet"

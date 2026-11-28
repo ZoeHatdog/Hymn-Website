@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getHymn, listHymns, updateHymn } from "../api";
+import { hymnChoice, hymnMatch } from "../hymnLabel";
 import { HymnForm } from "../components/HymnForm";
 import type { HymnDraft, HymnSummary } from "../types";
 
@@ -68,7 +69,7 @@ function HymnPicker() {
               id="query"
               type="search"
               autoComplete="off"
-              placeholder="Title or author"
+              placeholder="Title, library, or number"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
@@ -80,7 +81,7 @@ function HymnPicker() {
           <li key={hymn.id}>
             <Link className="row-link" to={`/update/${hymn.id}`}>
               <strong>{hymn.title}</strong>
-              <p>{hymn.author}</p>
+              <p>{hymnChoice(hymn)}</p>
             </Link>
           </li>
         ))}
@@ -108,6 +109,7 @@ function HymnEditor({ id }: { id: string }) {
           author: hymn.author ?? "",
           lyrics: hymn.lyrics ?? "",
           library: hymn.library ?? "",
+          page: hymn.page == null ? "" : String(hymn.page),
           tags: hymn.tags.join(", "),
           link: hymn.link ?? "",
         });
@@ -148,7 +150,7 @@ function filterHymns(hymns: HymnSummary[], query: string) {
   if (!needle) {
     return hymns;
   }
-  return hymns.filter((hymn) => `${hymn.title} ${hymn.author}`.toLowerCase().includes(needle));
+  return hymns.filter((hymn) => hymnMatch(hymn, needle));
 }
 
 function SkeletonRows() {

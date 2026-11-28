@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { requestLoginCode, verifyLoginCode } from "../api";
 import { useAuth } from "../auth";
+import { reportError, reportSuccess } from "../notices";
 
 const googleErrors: Record<string, string> = {
   google_config: "Google sign-in is not configured yet. Add the client id and secret to the env file.",
@@ -24,6 +25,10 @@ export function LoginPage() {
   const [pending, setPending] = useState(false);
 
   const googleError = googleErrors[params.get("error") ?? ""] ?? "";
+
+  useEffect(() => {
+    if (googleError) reportError(googleError);
+  }, [googleError]);
   const shownNote = note || googleError;
   const shownKind = noteKind || (googleError ? "error" : "");
 
@@ -41,6 +46,7 @@ export function LoginPage() {
       setSent(true);
       setNote("The code is on its way to that inbox.");
       setNoteKind("success");
+      reportSuccess("The code is on its way to that inbox.");
     } catch (error) {
       setNote(error instanceof Error ? error.message : "The code could not be sent.");
       setNoteKind("error");

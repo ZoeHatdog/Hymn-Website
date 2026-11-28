@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getHymn, listHymns } from "../api";
+import { hymnChoice, hymnMatch } from "../hymnLabel";
 import type { Hymn, HymnSummary } from "../types";
 
 export function ViewPage() {
@@ -46,7 +47,7 @@ function HymnPicker() {
     if (!needle) {
       return hymns;
     }
-    return hymns.filter((hymn) => `${hymn.title} ${hymn.author}`.toLowerCase().includes(needle));
+    return hymns.filter((hymn) => hymnMatch(hymn, needle));
   }, [hymns, query]);
 
   const message = !ready
@@ -75,7 +76,7 @@ function HymnPicker() {
               id="query"
               type="search"
               autoComplete="off"
-              placeholder="Title or author"
+              placeholder="Title, library, or number"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
@@ -101,7 +102,7 @@ function HymnPicker() {
             <li key={hymn.id}>
               <Link className="row-link" to={`/view/${hymn.id}`}>
                 <strong>{hymn.title}</strong>
-                <p>{hymn.author}</p>
+                <p>{hymnChoice(hymn)}</p>
               </Link>
             </li>
           ))
@@ -139,7 +140,7 @@ function HymnReader({ id }: { id: string }) {
   }, [id]);
 
   const facts = hymn
-    ? [hymn.author, hymn.library, hymn.tags.length > 0 ? hymn.tags.join(", ") : ""]
+    ? [hymn.page == null ? "" : `No. ${hymn.page}`, hymn.author, hymn.library, hymn.tags.length > 0 ? hymn.tags.join(", ") : ""]
         .filter((item): item is string => Boolean(item))
     : [];
 

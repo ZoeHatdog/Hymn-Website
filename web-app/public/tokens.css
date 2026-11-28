@@ -20,6 +20,9 @@
   --color-focus: oklch(35.4% 0.131 265.2);
   --color-error: oklch(39.4% 0.105 23.2);
   --color-error-soft: oklch(91.2% 0.044 18);
+  --color-done: oklch(40% 0.12 145);
+  --color-done-soft: oklch(95.5% 0.03 145);
+  --color-note-soft: oklch(95% 0.02 265);
   --color-success: oklch(35.4% 0.131 265.2);
   --color-on-paper: oklch(98.3% 0.004 236.5);
 

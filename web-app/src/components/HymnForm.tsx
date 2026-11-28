@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { uploadHymnImage } from "../api";
+import { reportError, reportSuccess } from "../notices";
 import type { HymnDraft } from "../types";
 
 const emptyDraft: HymnDraft = {
@@ -7,6 +8,7 @@ const emptyDraft: HymnDraft = {
   author: "",
   lyrics: "",
   library: "",
+  page: "",
   tags: "",
   link: "",
 };
@@ -17,6 +19,7 @@ const fieldCopy = {
   title: "The title is empty. A hymn is filed under its title.",
   author: "The author is empty. The library records who wrote it.",
   library: "Choose TBC or Rejoice.",
+  page: "Enter the hymn number. Each library keeps its own numbers.",
   lyrics: "The lyrics are empty. Type or paste the words of the hymn.",
   link: "That link is not a full URL. Include https://.",
 } as const;
@@ -33,19 +36,14 @@ export function HymnForm({ hymnId, initial = emptyDraft, submitLabel, onSubmit, 
   const [draft, setDraft] = useState(initial);
   const [sheet, setSheet] = useState<File | null>(null);
   const [sheetError, setSheetError] = useState("");
-  const [uploadState, setUploadState] = useState<"" | "loading" | "success">("");
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [note, setNote] = useState("");
-  const [noteKind, setNoteKind] = useState<"" | "error" | "success">("");
   const [saveState, setSaveState] = useState<"" | "loading" | "error" | "success">("");
 
   function update(name: keyof HymnDraft, value: string) {
     setDraft((current) => ({ ...current, [name]: value }));
     if (saveState === "error" || saveState === "success") {
       setSaveState("");
-      setNote("");
-      setNoteKind("");
     }
     if (touched[name] && isCheckedField(name)) {
       setErrors((current) => ({ ...current, [name]: validate(name, value) }));
@@ -58,20 +56,18 @@ export function HymnForm({ hymnId, initial = emptyDraft, submitLabel, onSubmit, 
       title: validate("title", draft.title),
       author: validate("author", draft.author),
       library: validate("library", draft.library),
+      page: validate("page", draft.page),
       lyrics: validate("lyrics", draft.lyrics),
       link: validate("link", draft.link),
     };
-    setTouched({ title: true, author: true, library: true, lyrics: true, link: true });
+    setTouched({ title: true, author: true, library: true, page: true, lyrics: true, link: true });
     setErrors(nextErrors);
     if (Object.values(nextErrors).some(Boolean)) {
       setSaveState("");
-      setNote("");
       return;
     }
 
     setSaveState("loading");
-    setNote("");
-    setNoteKind("");
     try {
       const saved = await onSubmit(draft);
       const id = hymnId || savedId(saved);
@@ -83,13 +79,13 @@ export function HymnForm({ hymnId, initial = emptyDraft, submitLabel, onSubmit, 
         setSheet(null);
       }
       setSaveState("success");
-      setNote("Saved.");
-      setNoteKind("success");
+      const title = draft.title.trim();
+      const action = submitLabel === "Save changes" ? "updated" : "in the library";
+      reportSuccess(`“${title}” is ${action}${sheet ? ", with its sheet" : ""}.`);
       onSuccess?.();
     } catch (error) {
       setSaveState("error");
-      setNoteKind("error");
-      setNote(error instanceof Error ? error.message : "The hymn was not saved. Try again in a moment.");
+      reportError(error instanceof Error ? error.message : "The hymn was not saved. Try again in a moment.");
     }
   }
 
@@ -127,6 +123,18 @@ export function HymnForm({ hymnId, initial = emptyDraft, submitLabel, onSubmit, 
         success={touched.library && !errors.library}
         onBlur={() => markTouched("library", draft.library)}
         onChange={(value) => update("library", value)}
+      />
+      <Field
+        id="page"
+        label="Hymn number"
+        type="number"
+        value={draft.page}
+        required
+        placeholder="45"
+        error={errors.page}
+        success={touched.page && !errors.page}
+        onBlur={() => markTouched("page", draft.page)}
+        onChange={(value) => update("page", value)}
       />
       <Field
         id="tags"
@@ -176,21 +184,7 @@ export function HymnForm({ hymnId, initial = emptyDraft, submitLabel, onSubmit, 
             {sheetError || (sheet ? sheet.name : "Only .webp files.")}
           </span>
         </label>
-        <div className="actions">
-          <button
-            className="btn btn-quiet"
-            type="button"
-            data-state={uploadState || undefined}
-            disabled={!sheet || uploadState === "loading" || saveState === "loading"}
-            onClick={() => void uploadSheet()}
-          >
-            {uploadState === "loading" ? "Uploading…" : uploadState === "success" ? "Uploaded" : "Upload"}
-          </button>
-        </div>
       </div>
-      <p className="form-note" data-kind={noteKind || undefined} role="status">
-        {note}
-      </p>
       <div className="actions">
         <button className="btn" type="submit" data-state={saveState || undefined} disabled={saveState === "loading"}>
           {saveText}
@@ -200,7 +194,6 @@ export function HymnForm({ hymnId, initial = emptyDraft, submitLabel, onSubmit, 
   );
 
   function chooseSheet(file: File | null) {
-    setUploadState("");
     if (!file) {
       setSheet(null);
       setSheetError("");
@@ -209,33 +202,6 @@ export function HymnForm({ hymnId, initial = emptyDraft, submitLabel, onSubmit, 
     const problem = webpProblem(file);
     setSheet(problem ? null : file);
     setSheetError(problem);
-  }
-
-  async function uploadSheet() {
-    const problem = sheet ? webpProblem(sheet) : "Choose a .webp file.";
-    if (!sheet || problem) {
-      setSheetError(problem);
-      return;
-    }
-    if (!hymnId) {
-      setNote("This sheet will upload when you save the hymn.");
-      setNoteKind("");
-      return;
-    }
-    setUploadState("loading");
-    setNote("");
-    setNoteKind("");
-    try {
-      await uploadHymnImage(hymnId, sheet);
-      setSheet(null);
-      setUploadState("success");
-      setNote("Uploaded.");
-      setNoteKind("success");
-    } catch (error) {
-      setUploadState("");
-      setNoteKind("error");
-      setNote(error instanceof Error ? error.message : "The sheet was not uploaded.");
-    }
   }
 
   function markTouched(name: keyof typeof fieldCopy, value: string) {
@@ -258,12 +224,16 @@ function savedId(value: unknown): string {
 }
 
 function isCheckedField(name: keyof HymnDraft): name is keyof typeof fieldCopy {
-  return name === "title" || name === "author" || name === "library" || name === "lyrics" || name === "link";
+  return name === "title" || name === "author" || name === "library" || name === "page" || name === "lyrics" || name === "link";
 }
 
 function validate(name: keyof typeof fieldCopy, value: string) {
   if (name === "library") {
     return libraries.includes(value as (typeof libraries)[number]) ? "" : fieldCopy.library;
+  }
+  if (name === "page") {
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed >= 1 ? "" : fieldCopy.page;
   }
   if (name === "link") {
     if (!value.trim()) {

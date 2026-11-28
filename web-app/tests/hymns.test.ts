@@ -9,8 +9,8 @@ type Row = Record<string, unknown> & { id: string };
 
 const store = new Map<string, Row>();
 const getAll = jest.fn(async () => [...store.values()]);
-const getOne = jest.fn(async (_model: unknown, _params: unknown, criteria: { id: string }) => {
-  const found = store.get(criteria.id);
+const getOne = jest.fn(async (_model: unknown, _params: unknown, criteria: Record<string, unknown>) => {
+  const found = [...store.values()].find((row) => Object.entries(criteria).every(([key, value]) => row[key] === value));
   return found ? [found] : [];
 });
 const insert = jest.fn(async (_model: unknown, values: Record<string, unknown>) => {
@@ -55,6 +55,7 @@ const draft = {
   author: "John Newton",
   lyrics: "Amazing grace, how sweet the sound",
   library: "TBC",
+  page: 45,
   link: "https://example.test/grace",
   tags: ["grace"],
 };
@@ -70,6 +71,7 @@ function hymn(id: string, extra: Record<string, unknown> = {}): Row {
     imagePaths: ["TBC/grace.webp"],
     tags: ["grace"],
     library: "TBC",
+    page: 1,
     link: null,
     created: new Date("2020-01-01T00:00:00.000Z"),
     updated: new Date("2020-01-02T00:00:00.000Z"),
@@ -109,7 +111,9 @@ describe("hymn CRUD", () => {
 
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
-    expect(response.body.data).toEqual([{ id: "hymn1", title: "Amazing Grace", author: "John Newton" }]);
+    expect(response.body.data).toEqual([
+      { id: "hymn1", title: "Amazing Grace", author: "John Newton", library: "TBC", page: 1 },
+    ]);
   });
 
   it("reads one hymn", async () => {
@@ -120,6 +124,7 @@ describe("hymn CRUD", () => {
       id: "hymn1",
       title: "Amazing Grace",
       library: "TBC",
+      page: 1,
       imageUrls: ["https://signed.test/TBC%2Fgrace.webp"],
     });
   });
@@ -143,8 +148,25 @@ describe("hymn CRUD", () => {
     const response = await request(app).post("/api/hymns").set("Cookie", keeperCookie()).send(draft);
 
     expect(response.status).toBe(201);
-    expect(response.body.data).toMatchObject({ id: "created-id", title: "Amazing Grace", library: "TBC" });
+    expect(response.body.data).toMatchObject({ id: "created-id", title: "Amazing Grace", library: "TBC", page: 45 });
     expect(store.has("created-id")).toBe(true);
+  });
+
+  it("allows the same hymn number in a different library", async () => {
+    store.set("hymn1", hymn("hymn1", { page: 45 }));
+    const response = await request(app).post("/api/hymns").set("Cookie", keeperCookie()).send({ ...draft, library: "Rejoice", page: 45 });
+
+    expect(response.status).toBe(201);
+    expect(response.body.data).toMatchObject({ library: "Rejoice", page: 45 });
+  });
+
+  it("rejects a hymn number already used in that library", async () => {
+    store.set("hymn1", hymn("hymn1", { page: 45 }));
+    const response = await request(app).post("/api/hymns").set("Cookie", keeperCookie()).send(draft);
+
+    expect(response.status).toBe(409);
+    expect(response.body.error).toBe("TBC already has hymn number 45.");
+    expect(store.has("created-id")).toBe(false);
   });
 
   it("rejects a library other than TBC or Rejoice", async () => {
@@ -171,6 +193,19 @@ describe("hymn CRUD", () => {
     expect(response.body.data.title).toBe("Corrected title");
     expect(response.body.data.library).toBe("Rejoice");
     expect(store.get("hymn1")?.title).toBe("Corrected title");
+    expect(store.get("hymn1")?.page).toBe(45);
+  });
+
+  it("rejects an update that reuses a hymn number in the same library", async () => {
+    store.set("other", hymn("other", { page: 45, library: "Rejoice" }));
+    const response = await request(app)
+      .put("/api/hymns/hymn1")
+      .set("Cookie", keeperCookie())
+      .send({ ...draft, library: "Rejoice", page: 45 });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error).toBe("Rejoice already has hymn number 45.");
+    expect(store.get("hymn1")?.page).toBe(1);
   });
 
   it("deletes a hymn", async () => {
@@ -199,9 +234,28 @@ describe("webp upload", () => {
     expect(response.status).toBe(201);
     expect(putImage).toHaveBeenCalledTimes(1);
     const [key, body] = putImage.mock.calls[0] as [string, Buffer];
-    expect(key).toMatch(/^uploads\/hymn1\/sheet-\d+\.webp$/);
+    expect(key).toBe("TBC/Amazing Grace - 1/Amazing Grace - 1.webp");
     expect(body.equals(webp)).toBe(true);
     expect(response.body.data.imageUrls).toHaveLength(2);
+  });
+
+  it("names the sheet from the library, title, and hymn number", async () => {
+    store.set(
+      "hymn1",
+      hymn("hymn1", { library: "Rejoice", title: "What A Wonderful Saviour!", page: 256, imagePaths: [] }),
+    );
+
+    const response = await request(app)
+      .post("/api/hymns/hymn1/image")
+      .set("Cookie", keeperCookie())
+      .set("Content-Type", "image/webp")
+      .set("X-File-Name", "scan.webp")
+      .send(webp);
+
+    expect(response.status).toBe(201);
+    expect(putImage.mock.calls[0]?.[0]).toBe(
+      "Rejoice/What A Wonderful Saviour! - 256/What A Wonderful Saviour! - 256.webp",
+    );
   });
 
   it("rejects a file that is not webp", async () => {
